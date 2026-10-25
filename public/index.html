@@ -102,6 +102,8 @@ input,select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid
 .bar .fill.up{bottom:50%;background:var(--inflow)} .bar .fill.down{top:50%;background:var(--water)}
 .bar .d{font-size:12px;color:var(--muted);font-weight:600}
 .bar .nv{font-family:var(--f-mono);font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.proj{margin:-6px 0 0;font-size:14px;color:var(--muted)}
+.proj b{font-family:var(--f-mono);font-weight:600}
 .fine{font-size:13px;color:var(--muted);margin:0;max-width:62ch}
 
 .sheetBack{position:fixed;inset:0;background:color-mix(in srgb,var(--ink) 45%,transparent);display:flex;align-items:flex-end;justify-content:center;z-index:20;
@@ -160,6 +162,8 @@ input,select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid
         <div class="stat"><div class="label">Drained</div><div class="v drain" id="sDrain">0</div></div>
         <div class="stat"><div class="label">Net today</div><div class="v" id="sNet">0</div></div>
       </div>
+
+      <p class="proj" id="proj"></p>
 
       <div class="card">
         <div class="kind">
@@ -264,18 +268,25 @@ function tdeeOf(p){
 function sumKind(list, k){ return list.reduce((a,e) => a + (e.kind === k ? e.kcal : 0), 0); }
 function model(now){
   const p = state.profile, tdee = tdeeOf(p);
-  const drained = tdee * Math.max(0, now - p.start) / DAY;
+  const drained = tdee * Math.max(0, now - dayZero(p)) / DAY;
   const bal = sumKind(state.entries,"food") - sumKind(state.entries,"move") - drained;
   const weight = p.weight + bal / KCAL_PER_LB;
   const fat = p.weight*p.bf/100 + bal / KCAL_PER_LB;
   return { tdee, bal, weight, bf: 100*fat/weight };
 }
 function dayWindow(t0, t1){
-  const p = state.profile, from = Math.max(t0, p.start), to = Math.min(t1, Date.now());
+  const p = state.profile, from = Math.max(t0, dayZero(p)), to = Math.min(t1, Date.now());
   if (to <= from) return null;
   const es = state.entries.filter(e => e.ts >= t0 && e.ts < t1);
   const food = sumKind(es,"food"), move = sumKind(es,"move"), drain = tdeeOf(p) * (to - from) / DAY;
   return { food, move, drain, net: food - move - drain, entries: es };
+}
+/* Your first day counts from its midnight, so food eaten before you set up is balanced by a full day of burn. */
+function dayZero(p){ return midnight(p.start); }
+function projection(now){
+  const t0 = midnight(now), t1 = midnight(t0 + DAY + 72e5), t = dayWindow(t0, t1) || {food:0, move:0};
+  const end = t.food - t.move - tdeeOf(state.profile) * (t1 - Math.max(t0, dayZero(state.profile))) / DAY;
+  return end;
 }
 function midnight(t){ const d = new Date(t); d.setHours(0,0,0,0); return d.getTime(); }
 
@@ -301,6 +312,8 @@ function renderReadout(){
   $("#sDrain").textContent = t.drain.toLocaleString(undefined,{minimumFractionDigits:1,maximumFractionDigits:1});
   const sn = $("#sNet"); sn.textContent = signed(t.net);
   sn.style.color = t.net <= 0 ? "var(--good)" : "var(--inflow)";
+  const pe = projection(now);
+  $("#proj").innerHTML = `If you eat nothing else, today ends at <b style="color:${pe <= 0 ? "var(--good)" : "var(--inflow)"}">${signed(pe)} kcal</b> (${signed(toU(pe/KCAL_PER_LB),2)} ${unit()}). That's the dashed "midnight" line in the bucket.`;
   $("#caption").textContent = mode === "today"
     ? `The middle line means even for the day. You drain about ${n0(m.tdee/24)} kcal an hour, around the clock. Food pours in, workouts open the tap.`
     : `Full is where you started at ${toU(state.profile.weight).toFixed(1)} ${unit()}.` + (g && g < state.profile.weight ? ` Empty is your goal of ${toU(g).toFixed(1)} ${unit()}.` : " Add a goal weight to set the bottom of the bucket.");
@@ -442,7 +455,7 @@ function scale(){
   if (mode === "today") {
     const t = dayWindow(midnight(now), midnight(now) + DAY) || { net: 0 };
     const ticks = [-1500,-1000,-500,0,500,1000,1500].map(k => ({ f: .5 + k/3000, label: k === 0 ? "even" : signed(k), strong: k === 0 }));
-    return { level: .5 + t.net/3000, ticks };
+    return { level: .5 + t.net/3000, ticks, ghost: .5 + projection(now)/3000 };
   }
   const p = state.profile, w = model(now).weight;
   let lo = p.goal && p.goal < p.weight ? p.goal : p.weight - 10;
@@ -495,6 +508,13 @@ function draw(time, dt){
   ctx.setLineDash([]); ctx.globalAlpha = 1;
   ripples.forEach(r => { ctx.strokeStyle = C.surface; ctx.globalAlpha = r.a*.7; ctx.beginPath(); ctx.ellipse(r.x, lvlY, r.r, r.r*.28, 0, 0, Math.PI*2); ctx.stroke(); });
   ctx.globalAlpha = 1; ctx.restore();
+
+  // where today ends if nothing else is eaten
+  if (sc.ghost != null) { const gf = Math.max(.01, Math.min(.99, sc.ghost)), gy = g.bot - gf*(g.bot-g.top);
+    ctx.strokeStyle = C.inflow; ctx.lineWidth = 2; ctx.setLineDash([3,4]);
+    ctx.beginPath(); ctx.moveTo(g.x0+2, gy); ctx.lineTo(g.x1-2, gy); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = C.inflow; ctx.textAlign = "right"; ctx.textBaseline = gf > .9 ? "top" : "bottom";
+    ctx.fillText("midnight", g.x1-8, gy + (gf > .9 ? 5 : -5)); ctx.lineWidth = 1; }
 
   // glass
   tankPath(g); ctx.strokeStyle = C.ink; ctx.globalAlpha = .55; ctx.lineWidth = 2; ctx.stroke(); ctx.globalAlpha = 1;
