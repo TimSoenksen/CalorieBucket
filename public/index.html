@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Calorie Bucket</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0}[hidden]{display:none!important}
+/* Layout: one column on phones; tank on the left, controls on the right from 860px. The tank is the hero. */
+:root{
+  --bg:#eaf0f2; --surface:#fbfdfd; --ink:#132329; --muted:#566c75; --line:#cfdbe0;
+  --water:#1d8ea8; --water-deep:#0d5a6f; --inflow:#d98a1c; --move:#d24f3b; --good:#28855a;
+  --f-display:"Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --f-body:"Instrument Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono:"JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0c1519; --surface:#132127; --ink:#e2ecef; --muted:#8ca2ab; --line:#223841;
+  --water:#2aaecb; --water-deep:#12697f; --inflow:#f0ad45; --move:#ef6b56; --good:#4cbd80; color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#0c1519; --surface:#132127; --ink:#e2ecef; --muted:#8ca2ab; --line:#223841;
+  --water:#2aaecb; --water-deep:#12697f; --inflow:#f0ad45; --move:#ef6b56; --good:#4cbd80; color-scheme:dark }
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.45;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px));padding-block:20px 40px}
+.app{max-width:1060px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+h1,h2{font-family:var(--f-display);margin:0;text-wrap:balance}
+h1{font-size:30px;font-weight:700;letter-spacing:-.01em}
+h2{font-size:17px;font-weight:700}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.sub{margin:4px 0 0;color:var(--muted);max-width:46ch}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--water);outline-offset:2px}
+.ghost{background:transparent;border:1px solid var(--line);border-radius:999px;padding:8px 14px;font-weight:600}
+.ghost:hover{border-color:var(--water)}
+.primary{background:var(--water);color:#fff;border:0;border-radius:10px;padding:10px 16px;font-weight:600}
+.primary:hover{background:var(--water-deep)}
+.banner{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;
+  background:var(--surface);border:1px dashed var(--inflow);border-radius:12px;padding:12px 14px}
+.banner p{margin:0;min-width:0;flex:1 1 240px}
+
+.grid{display:grid;grid-template-columns:1fr;gap:20px}
+@media (min-width:860px){.grid{grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);align-items:start}
+  .tankCol{position:sticky;top:16px}}
+.tankCol{display:flex;flex-direction:column;gap:10px;min-width:0}
+.seg{display:inline-flex;align-self:flex-start;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:3px}
+.seg button{border:0;background:transparent;border-radius:999px;padding:6px 14px;font-weight:600;color:var(--muted)}
+.seg button[aria-selected="true"]{background:var(--ink);color:var(--bg)}
+.tankWrap{position:relative;height:clamp(340px,58vh,520px)}
+#tank{width:100%;height:100%;display:block}
+#floaters{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.floater{position:absolute;left:52%;transform:translateX(-50%);font-family:var(--f-mono);font-weight:600;font-size:15px;
+  padding:4px 10px;border-radius:999px;background:var(--surface);border:1px solid currentColor;white-space:nowrap;
+  animation:float 2.4s ease-out forwards}
+.floater.food{color:var(--inflow)} .floater.move{color:var(--move)}
+@keyframes float{0%{top:42%;opacity:0}12%{opacity:1}100%{top:12%;opacity:0}}
+.caption{margin:0;color:var(--muted);font-size:13.5px;max-width:60ch}
+
+.side{display:flex;flex-direction:column;gap:18px;min-width:0}
+.label{font-size:11.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.big{font-family:var(--f-mono);font-size:clamp(34px,8vw,46px);font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.1}
+.big small{font-size:.45em;color:var(--muted);margin-left:4px}
+.deltas{display:flex;gap:6px 14px;flex-wrap:wrap;color:var(--muted);font-size:14px;margin-top:4px}
+.deltas b{color:var(--ink);font-family:var(--f-mono);font-weight:600}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+@media (max-width:420px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.stat{background:var(--surface);padding:10px 12px}
+.stat .v{font-family:var(--f-mono);font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;margin-top:2px}
+.stat .v.food{color:var(--inflow)} .stat .v.move{color:var(--move)} .stat .v.drain{color:var(--water)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:12px}
+.kind{display:flex;gap:6px}
+.kind button{flex:1;border:1px solid var(--line);background:transparent;border-radius:10px;padding:8px;font-weight:600;color:var(--muted)}
+.kind button[aria-pressed="true"].f{border-color:var(--inflow);color:var(--inflow);background:color-mix(in srgb,var(--inflow) 10%,transparent)}
+.kind button[aria-pressed="true"].m{border-color:var(--move);color:var(--move);background:color-mix(in srgb,var(--move) 10%,transparent)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:1px solid var(--line);background:var(--bg);border-radius:999px;padding:6px 11px;font-size:13.5px}
+.chip span{font-family:var(--f-mono);color:var(--muted);margin-left:6px;font-size:12.5px}
+.chip:hover{border-color:var(--ink)}
+.custom{display:grid;grid-template-columns:minmax(0,1fr) 92px auto;gap:8px}
+input,select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 10px;width:100%;min-width:0}
+.hint{margin:0;font-size:12.5px;color:var(--muted)}
+.log ul{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column}
+.log li{display:grid;grid-template-columns:52px minmax(0,1fr) auto 28px;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
+.log li:first-child{border-top:0}
+.log .t{font-family:var(--f-mono);font-size:12.5px;color:var(--muted)}
+.log .n{overflow-wrap:anywhere}
+.log .k{font-family:var(--f-mono);font-weight:600;font-variant-numeric:tabular-nums}
+.log .k.food{color:var(--inflow)} .log .k.move{color:var(--move)}
+.log .del{border:0;background:transparent;color:var(--muted);font-size:18px;line-height:1;padding:4px;border-radius:6px}
+.log .del:hover{color:var(--move)}
+.empty{color:var(--muted);font-size:14px;margin:10px 0 0}
+.week .bars{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;margin-top:10px}
+.bar{display:flex;flex-direction:column;align-items:center;gap:4px}
+.bar .area{position:relative;width:100%;height:84px}
+.bar .area::after{content:"";position:absolute;left:0;right:0;top:50%;border-top:1px solid var(--line)}
+.bar .fill{position:absolute;left:22%;right:22%;border-radius:4px}
+.bar .fill.up{bottom:50%;background:var(--inflow)} .bar .fill.down{top:50%;background:var(--water)}
+.bar .d{font-size:12px;color:var(--muted);font-weight:600}
+.bar .nv{font-family:var(--f-mono);font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.fine{font-size:13px;color:var(--muted);margin:0;max-width:62ch}
+
+.sheetBack{position:fixed;inset:0;background:color-mix(in srgb,var(--ink) 45%,transparent);display:flex;align-items:flex-end;justify-content:center;z-index:20;
+  padding:16px max(16px, env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px))}
+@media (min-width:600px){.sheetBack{align-items:center}}
+.sheet{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px;width:100%;max-width:460px;max-height:100%;overflow:auto;display:flex;flex-direction:column;gap:12px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.field label{font-size:13px;font-weight:600}
+.burn{background:var(--bg);border-radius:10px;padding:10px 12px;font-size:14px}
+.burn b{font-family:var(--f-mono)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.danger{background:transparent;border:1px solid var(--move);color:var(--move);border-radius:10px;padding:10px 14px;font-weight:600;margin-right:auto}
+@media (prefers-reduced-motion:reduce){.floater{animation-duration:1.6s}}
+</style>
+
+</head>
+<body>
+<main class="app">
+  <header class="top">
+    <div>
+      <h1>Calorie Bucket</h1>
+      <p class="sub">Your body drains energy every second. Food pours some back in. Watch the level.</p>
+    </div>
+    <button id="btnSetup" class="ghost" type="button">Your numbers</button>
+  </header>
+
+  <div id="banner" class="banner" hidden>
+    <p>You're looking at example data from a made-up person so you can see it working. Enter your own numbers to start your bucket.</p>
+    <button id="btnSetup2" class="primary" type="button">Set up mine</button>
+  </div>
+
+  <div class="grid">
+    <section class="tankCol" aria-label="Bucket">
+      <div class="seg" role="tablist">
+        <button id="modeToday" role="tab" aria-selected="true" type="button">Today</button>
+        <button id="modeJourney" role="tab" aria-selected="false" type="button">Whole journey</button>
+      </div>
+      <div class="tankWrap">
+        <canvas id="tank" aria-label="Water level showing your energy balance"></canvas>
+        <div id="floaters"></div>
+      </div>
+      <p id="caption" class="caption"></p>
+    </section>
+
+    <section class="side">
+      <div>
+        <div class="label">Estimated weight right now</div>
+        <div class="big" id="wNow">—</div>
+        <div class="deltas" id="wDelta"></div>
+      </div>
+
+      <div class="stats" aria-label="Today">
+        <div class="stat"><div class="label">Eaten</div><div class="v food" id="sEat">0</div></div>
+        <div class="stat"><div class="label">Moved</div><div class="v move" id="sMove">0</div></div>
+        <div class="stat"><div class="label">Drained</div><div class="v drain" id="sDrain">0</div></div>
+        <div class="stat"><div class="label">Net today</div><div class="v" id="sNet">0</div></div>
+      </div>
+
+      <div class="card">
+        <div class="kind">
+          <button id="kFood" class="f" aria-pressed="true" type="button">Ate something</button>
+          <button id="kMove" class="m" aria-pressed="false" type="button">Exercised</button>
+        </div>
+        <div class="chips" id="chips"></div>
+        <form id="customForm" class="custom">
+          <input id="cName" placeholder="What was it?" autocomplete="off">
+          <input id="cKcal" type="number" inputmode="numeric" min="1" max="5000" placeholder="kcal">
+          <button class="primary" type="submit">Add</button>
+        </form>
+        <p class="hint" id="kindHint"></p>
+      </div>
+
+      <div class="log">
+        <h2>Today's log</h2>
+        <ul id="logList"></ul>
+        <p class="empty" id="logEmpty" hidden>Nothing logged yet today. The bucket is draining anyway.</p>
+      </div>
+
+      <div class="week">
+        <h2>Last 7 days</h2>
+        <div class="bars" id="bars"></div>
+      </div>
+
+      <p class="fine">How it works: your estimated daily burn (from weight, body fat and activity) drains out continuously, second by second. Food adds calories, exercise drains extra. Every 3,500 kcal is treated as about one pound. It's an estimate of the trend underneath the scale. Real scale weight can swing a few pounds day to day from water, salt and digestion, which this deliberately ignores.</p>
+    </section>
+  </div>
+</main>
+
+<div id="sheetBack" class="sheetBack" hidden>
+  <form class="sheet" id="setupForm">
+    <h2>Your numbers</h2>
+    <div class="row2">
+      <div class="field"><label for="fUnit">Units</label>
+        <select id="fUnit"><option value="lb">Pounds (lb)</option><option value="kg">Kilograms (kg)</option></select></div>
+      <div class="field"><label for="fWeight">Current weight</label><input id="fWeight" type="number" step="0.1" min="50" max="1000" required></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label for="fBf">Body fat % (a guess is fine)</label><input id="fBf" type="number" step="0.5" min="3" max="70" required></div>
+      <div class="field"><label for="fGoal">Goal weight</label><input id="fGoal" type="number" step="0.1" min="50" max="1000"></div>
+    </div>
+    <p class="hint">Not sure about body fat? Many men land around 18–30% and many women around 25–38%. It only nudges the burn estimate.</p>
+    <div class="field"><label for="fAct">Typical day, not counting logged workouts</label>
+      <select id="fAct">
+        <option value="sedentary">Mostly sitting</option>
+        <option value="light">On my feet some</option>
+        <option value="moderate">On my feet a lot</option>
+        <option value="very">Physical job</option>
+      </select></div>
+    <div class="field"><label for="fTdee">Daily burn override (optional, kcal)</label><input id="fTdee" type="number" min="1000" max="6000" placeholder="Leave blank to estimate"></div>
+    <div class="burn" id="burnPreview"></div>
+    <div class="actions">
+      <button type="button" class="danger" id="btnRestart" hidden>Start over from now</button>
+      <button type="button" class="ghost" id="btnCancel">Cancel</button>
+      <button type="submit" class="primary" id="btnSave">Save</button>
+    </div>
+  </form>
+</div>
+
+<script>
+(() => {
+const KCAL_PER_LB = 3500, LB_PER_KG = 2.20462, DAY = 864e5;
+const ACT = { sedentary: 1.2, light: 1.375, moderate: 1.55, very: 1.725 };
+const FOODS = [["Snickers bar",250],["Latte, 16 oz",190],["Banana",105],["Eggs & toast",360],["Turkey sandwich",450],["Slice of pizza",285],["Burrito bowl",650],["Can of soda",140]];
+const MOVES = [["Walk, 30 min",3.5,.5],["Run, 30 min",9.8,.5],["Bike, 45 min",7.5,.75],["Lift weights, 45 min",5,.75],["Swim, 30 min",7,.5],["Yard work, 1 hr",4,1]];
+const $ = s => document.querySelector(s);
+const STORE = "calorie-bucket-v1";
+
+let state = load() || makeExample();
+let mode = "today", kind = "food";
+try { mode = localStorage.getItem(STORE + "-mode") || "today"; } catch (e) {}
+
+function load(){ try { const s = JSON.parse(localStorage.getItem(STORE)); return s && s.profile ? s : null; } catch(e){ return null; } }
+function save(){ try { localStorage.setItem(STORE, JSON.stringify(state)); } catch(e){} }
+function uid(){ return Math.random().toString(36).slice(2,10); }
+
+function makeExample(){
+  const now = Date.now(), mid = new Date(); mid.setHours(0,0,0,0);
+  const start = mid.getTime() - 4*DAY + 7*36e5;
+  const plan = [[8,0,"Oatmeal with berries",320,"food"],[12,30,"Turkey sandwich",450,"food"],[15,10,"Snickers bar",250,"food"],
+                [17,30,"Walk, 30 min",113,"move"],[19,0,"Chicken, rice & broccoli",620,"food"],[21,0,"Greek yogurt",150,"food"]];
+  const entries = [];
+  for (let d = 4; d >= 0; d--) {
+    plan.forEach(([h,m,name,kcal,k], i) => {
+      if (d % 2 === 0 && name.startsWith("Snickers")) return;
+      if (d === 1 && k === "move") { name = "Run, 30 min"; kcal = 385; }
+      const ts = mid.getTime() - d*DAY + h*36e5 + m*6e4;
+      if (ts > start && ts < now) entries.push({ id: uid(), ts, kind: k, name, kcal });
+    });
+  }
+  return { example: true, profile: { unit: "lb", weight: 214, bf: 31, goal: 195, activity: "light", tdee: null, start }, entries };
+}
+
+/* ---------- model ---------- */
+function tdeeOf(p){
+  if (p.tdee) return p.tdee;
+  const lbm = (p.weight / LB_PER_KG) * (1 - p.bf/100);
+  return Math.round((370 + 21.6*lbm) * ACT[p.activity]);
+}
+function sumKind(list, k){ return list.reduce((a,e) => a + (e.kind === k ? e.kcal : 0), 0); }
+function model(now){
+  const p = state.profile, tdee = tdeeOf(p);
+  const drained = tdee * Math.max(0, now - p.start) / DAY;
+  const bal = sumKind(state.entries,"food") - sumKind(state.entries,"move") - drained;
+  const weight = p.weight + bal / KCAL_PER_LB;
+  const fat = p.weight*p.bf/100 + bal / KCAL_PER_LB;
+  return { tdee, bal, weight, bf: 100*fat/weight };
+}
+function dayWindow(t0, t1){
+  const p = state.profile, from = Math.max(t0, p.start), to = Math.min(t1, Date.now());
+  if (to <= from) return null;
+  const es = state.entries.filter(e => e.ts >= t0 && e.ts < t1);
+  const food = sumKind(es,"food"), move = sumKind(es,"move"), drain = tdeeOf(p) * (to - from) / DAY;
+  return { food, move, drain, net: food - move - drain, entries: es };
+}
+function midnight(t){ const d = new Date(t); d.setHours(0,0,0,0); return d.getTime(); }
+
+/* ---------- formatting ---------- */
+const unit = () => state.profile.unit;
+const toU = lb => unit() === "kg" ? lb / LB_PER_KG : lb;
+const fromU = v => unit() === "kg" ? v * LB_PER_KG : v;
+const n0 = v => Math.round(v).toLocaleString();
+function signed(v, d=0){ const s = Math.abs(v).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d}); return (v > 0 ? "+" : v < 0 ? "−" : "") + s; }
+
+/* ---------- readouts ---------- */
+function renderReadout(){
+  const now = Date.now(), m = model(now), t = dayWindow(midnight(now), midnight(now) + DAY) || {food:0,move:0,drain:0,net:0};
+  $("#wNow").innerHTML = toU(m.weight).toFixed(3) + "<small>" + unit() + "</small>";
+  const lost = toU(m.weight - state.profile.weight);
+  const since = new Date(state.profile.start).toLocaleDateString(undefined,{month:"short",day:"numeric"});
+  let html = `<span><b>${signed(lost,3)} ${unit()}</b> since ${since}</span><span>body fat ≈ <b>${m.bf.toFixed(1)}%</b></span>`;
+  const g = state.profile.goal;
+  if (g && g < state.profile.weight) html += `<span><b>${Math.max(0,toU(m.weight-g)).toFixed(1)} ${unit()}</b> to goal</span>`;
+  $("#wDelta").innerHTML = html;
+  $("#sEat").textContent = n0(t.food);
+  $("#sMove").textContent = n0(t.move);
+  $("#sDrain").textContent = t.drain.toLocaleString(undefined,{minimumFractionDigits:1,maximumFractionDigits:1});
+  const sn = $("#sNet"); sn.textContent = signed(t.net);
+  sn.style.color = t.net <= 0 ? "var(--good)" : "var(--inflow)";
+  $("#caption").textContent = mode === "today"
+    ? `The middle line means even for the day. You drain about ${n0(m.tdee/24)} kcal an hour, around the clock. Food pours in, workouts open the tap.`
+    : `Full is where you started at ${toU(state.profile.weight).toFixed(1)} ${unit()}.` + (g && g < state.profile.weight ? ` Empty is your goal of ${toU(g).toFixed(1)} ${unit()}.` : " Add a goal weight to set the bottom of the bucket.");
+}
+
+function renderLog(){
+  const now = Date.now(), t0 = midnight(now);
+  const es = state.entries.filter(e => e.ts >= t0).sort((a,b) => b.ts - a.ts);
+  const ul = $("#logList"); ul.innerHTML = "";
+  $("#logEmpty").hidden = es.length > 0;
+  es.forEach(e => {
+    const li = document.createElement("li");
+    const time = new Date(e.ts).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"});
+    li.innerHTML = `<span class="t"></span><span class="n"></span><span class="k ${e.kind}"></span><button class="del" type="button" aria-label="Remove">×</button>`;
+    li.querySelector(".t").textContent = time;
+    li.querySelector(".n").textContent = e.name;
+    li.querySelector(".k").textContent = (e.kind === "food" ? "+" : "−") + n0(e.kcal);
+    li.querySelector(".del").onclick = () => { state.entries = state.entries.filter(x => x.id !== e.id); save(); renderAll(); };
+    ul.appendChild(li);
+  });
+}
+
+function renderWeek(){
+  const box = $("#bars"); box.innerHTML = "";
+  const today = midnight(Date.now()), days = [];
+  for (let i = 6; i >= 0; i--) { const d0 = midnight(today - i*DAY + 36e5*2); days.push([d0, dayWindow(d0, midnight(d0 + DAY + 36e5*2))]); }
+  const max = Math.max(800, ...days.map(([,w]) => w ? Math.abs(w.net) : 0));
+  days.forEach(([d0, w]) => {
+    const el = document.createElement("div"); el.className = "bar";
+    const label = new Date(d0).toLocaleDateString(undefined,{weekday:"short"});
+    let fill = "", nv = "—";
+    if (w) { const h = Math.min(50, 50*Math.abs(w.net)/max); fill = `<div class="fill ${w.net > 0 ? "up" : "down"}" style="height:${h}%"></div>`; nv = signed(w.net); }
+    el.innerHTML = `<div class="area">${fill}</div><div class="d">${label}</div><div class="nv">${nv}</div>`;
+    el.title = w ? `${label}: ate ${n0(w.food)}, moved ${n0(w.move)}, drained ${n0(w.drain)}` : `${label}: before you started`;
+    box.appendChild(el);
+  });
+}
+
+function renderChips(){
+  const box = $("#chips"); box.innerHTML = "";
+  const kg = model(Date.now()).weight / LB_PER_KG;
+  const list = kind === "food" ? FOODS.map(([n,k]) => [n,k]) : MOVES.map(([n,met,h]) => [n, Math.round((met-1)*kg*h)]);
+  list.forEach(([name,kcal]) => {
+    const b = document.createElement("button"); b.type = "button"; b.className = "chip";
+    b.innerHTML = `<span></span>`; b.prepend(name); b.querySelector("span").textContent = (kind==="food"?"+":"−") + kcal;
+    b.onclick = () => addEntry(name, kcal);
+    box.appendChild(b);
+  });
+  $("#kFood").setAttribute("aria-pressed", kind === "food");
+  $("#kMove").setAttribute("aria-pressed", kind === "move");
+  $("#cName").placeholder = kind === "food" ? "What did you eat?" : "What did you do?";
+  $("#kindHint").textContent = kind === "food"
+    ? "Tap a preset to pour it in, or type your own with its calories from the label."
+    : "Workout presets are sized to your weight and count only the extra burn above resting, since resting is already draining.";
+}
+
+function renderAll(){ renderReadout(); renderLog(); renderWeek(); renderChips();
+  $("#banner").hidden = !state.example;
+  $("#modeToday").setAttribute("aria-selected", mode === "today");
+  $("#modeJourney").setAttribute("aria-selected", mode === "journey"); }
+
+function addEntry(name, kcal){
+  kcal = Math.round(kcal); if (!(kcal > 0)) return;
+  state.entries.push({ id: uid(), ts: Date.now(), kind, name: name || (kind === "food" ? "Food" : "Exercise"), kcal });
+  save(); renderAll();
+  floater(kind, `${kind === "food" ? "+" : "−"}${n0(kcal)} kcal · ${kind === "food" ? "+" : "−"}${toU(kcal/KCAL_PER_LB).toFixed(2)} ${unit()}`);
+  if (kind === "food") pour(kcal); else surge(kcal);
+}
+function floater(k, text){
+  const f = document.createElement("div"); f.className = "floater " + k; f.textContent = text;
+  f.addEventListener("animationend", () => f.remove()); $("#floaters").appendChild(f);
+}
+
+/* ---------- events ---------- */
+$("#kFood").onclick = () => { kind = "food"; renderChips(); };
+$("#kMove").onclick = () => { kind = "move"; renderChips(); };
+$("#customForm").addEventListener("submit", e => { e.preventDefault();
+  const k = parseFloat($("#cKcal").value); if (!(k > 0)) { $("#cKcal").focus(); return; }
+  addEntry($("#cName").value.trim(), k); $("#cName").value = ""; $("#cKcal").value = ""; });
+function setMode(m){ mode = m; try { localStorage.setItem(STORE + "-mode", m); } catch(e){} renderAll(); }
+$("#modeToday").onclick = () => setMode("today");
+$("#modeJourney").onclick = () => setMode("journey");
+
+/* setup sheet */
+const sheet = $("#sheetBack");
+function openSetup(){
+  const p = state.profile, ex = state.example;
+  $("#fUnit").value = p.unit;
+  $("#fWeight").value = ex ? "" : toU(p.weight).toFixed(1);
+  $("#fBf").value = ex ? "" : p.bf;
+  $("#fGoal").value = ex || !p.goal ? "" : toU(p.goal).toFixed(1);
+  $("#fAct").value = p.activity; $("#fTdee").value = ex || !p.tdee ? "" : p.tdee;
+  $("#btnRestart").hidden = ex; $("#btnRestart").textContent = "Start over from now"; restartArmed = false;
+  $("#btnSave").textContent = ex ? "Start my bucket" : "Save";
+  previewBurn(); sheet.hidden = false; $("#fWeight").focus();
+}
+function readForm(){
+  const u = $("#fUnit").value, cv = v => u === "kg" ? v*LB_PER_KG : v;
+  const w = parseFloat($("#fWeight").value), bf = parseFloat($("#fBf").value), g = parseFloat($("#fGoal").value), td = parseInt($("#fTdee").value);
+  return { unit: u, weight: w > 0 ? cv(w) : null, bf: bf > 0 ? bf : null, goal: g > 0 ? cv(g) : null, activity: $("#fAct").value, tdee: td >= 1000 ? td : null };
+}
+function previewBurn(){
+  const f = readForm();
+  if (!f.weight || !f.bf) { $("#burnPreview").textContent = "Enter weight and body fat to see your estimated daily burn."; return; }
+  const t = tdeeOf(f);
+  $("#burnPreview").innerHTML = `Your bucket will drain about <b>${n0(t)} kcal a day</b>, or <b>${n0(t/24)} an hour</b>.`;
+}
+$("#setupForm").addEventListener("input", previewBurn);
+$("#btnSetup").onclick = openSetup; $("#btnSetup2").onclick = openSetup;
+$("#btnCancel").onclick = () => { sheet.hidden = true; };
+sheet.addEventListener("click", e => { if (e.target === sheet) sheet.hidden = true; });
+document.addEventListener("keydown", e => { if (e.key === "Escape") sheet.hidden = true; });
+$("#setupForm").addEventListener("submit", e => { e.preventDefault();
+  const f = readForm(); if (!f.weight || !f.bf) return;
+  if (state.example) { state = { example: false, profile: { ...f, start: Date.now() }, entries: [] }; }
+  else { state.profile = { ...state.profile, ...f }; }
+  save(); sheet.hidden = true; renderAll(); });
+let restartArmed = false;
+$("#btnRestart").onclick = () => {
+  if (!restartArmed) { restartArmed = true; $("#btnRestart").textContent = "Tap again to clear your log"; return; }
+  const f = readForm(); if (!f.weight || !f.bf) return;
+  state = { example: false, profile: { ...f, start: Date.now() }, entries: [] }; save(); sheet.hidden = true; renderAll(); };
+
+/* ---------- the tank ---------- */
+const cv = $("#tank"), ctx = cv.getContext("2d");
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let W = 0, H = 0, C = {};
+function resize(){ const r = cv.getBoundingClientRect(), d = devicePixelRatio || 1;
+  W = r.width; H = r.height; cv.width = Math.round(W*d); cv.height = Math.round(H*d); ctx.setTransform(d,0,0,d,0,0); }
+new ResizeObserver(resize).observe(cv);
+function readColors(){ const cs = getComputedStyle(document.documentElement);
+  ["bg","surface","ink","muted","line","water","water-deep","inflow","move"].forEach(k => C[k] = cs.getPropertyValue("--"+k).trim()); }
+readColors();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", readColors);
+new MutationObserver(readColors).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme","class"] });
+
+function scale(){
+  const now = Date.now();
+  if (mode === "today") {
+    const t = dayWindow(midnight(now), midnight(now) + DAY) || { net: 0 };
+    const ticks = [-1500,-1000,-500,0,500,1000,1500].map(k => ({ f: .5 + k/3000, label: k === 0 ? "even" : signed(k), strong: k === 0 }));
+    return { level: .5 + t.net/3000, ticks };
+  }
+  const p = state.profile, w = model(now).weight;
+  let lo = p.goal && p.goal < p.weight ? p.goal : p.weight - 10;
+  let hi = p.weight + (p.weight - lo) * .12;
+  const span = toU(hi - lo), step = [.5,1,2,5,10,20,50].find(s => span/s <= 7) || 50;
+  const ticks = [];
+  for (let v = Math.ceil(toU(lo)/step)*step; v <= toU(hi); v += step) ticks.push({ f: (fromU(v)-lo)/(hi-lo), label: (+v.toFixed(1)) + "" });
+  ticks.push({ f: (p.weight-lo)/(hi-lo), label: "start", strong: true });
+  if (p.goal && p.goal < p.weight) ticks.push({ f: 0, label: "goal", strong: true });
+  return { level: (w-lo)/(hi-lo), ticks };
+}
+
+let shown = null, parts = [], ripples = [], surgeUntil = 0, pourQueue = 0, last = performance.now(), dripAcc = 0;
+function geo(){ const x0 = Math.max(70, W*.2), x1 = W - Math.max(16, W*.08), top = 18, bot = H - 64; return { x0, x1, top, bot, r: Math.min(30, (x1-x0)*.12) }; }
+function tankPath(g){ ctx.beginPath(); ctx.moveTo(g.x0, g.top); ctx.lineTo(g.x0, g.bot-g.r); ctx.quadraticCurveTo(g.x0, g.bot, g.x0+g.r, g.bot);
+  ctx.lineTo(g.x1-g.r, g.bot); ctx.quadraticCurveTo(g.x1, g.bot, g.x1, g.bot-g.r); ctx.lineTo(g.x1, g.top); }
+function pour(kcal){ pourQueue += Math.min(36, 6 + kcal/30); }
+function surge(kcal){ surgeUntil = performance.now() + Math.min(7000, 2000 + kcal*8); }
+
+function frame(t){
+  const dt = Math.min(.05, (t - last)/1000); last = t;
+  if (W && H) draw(t/1000, dt);
+  requestAnimationFrame(frame);
+}
+function draw(time, dt){
+  const g = geo(), sc = scale();
+  const target = Math.max(.02, Math.min(.98, sc.level));
+  shown = shown == null ? target : shown + (target - shown) * Math.min(1, dt*2.5);
+  const lvlY = g.bot - shown*(g.bot - g.top);
+  ctx.clearRect(0,0,W,H);
+
+  // ruler
+  ctx.font = "11px " + getComputedStyle(document.body).getPropertyValue("--f-mono"); ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  sc.ticks.forEach(k => { if (k.f < -.01 || k.f > 1.01) return; const y = g.bot - k.f*(g.bot-g.top);
+    ctx.strokeStyle = k.strong ? C.ink : C.muted; ctx.globalAlpha = k.strong ? .9 : .6; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(g.x0-8, y); ctx.lineTo(g.x0-2, y); ctx.stroke();
+    ctx.fillStyle = k.strong ? C.ink : C.muted; ctx.fillText(k.label, g.x0-12, y); ctx.globalAlpha = 1; });
+
+  // water
+  ctx.save(); tankPath(g); ctx.closePath(); ctx.clip();
+  const amp = reduce ? 0.3 : 0.7 + (performance.now() < surgeUntil ? 0.6 : 0);
+  ctx.beginPath(); ctx.moveTo(g.x0, g.bot);
+  for (let x = g.x0; x <= g.x1 + 4; x += 4) ctx.lineTo(x, lvlY + Math.sin(x*.032 + time*1.7)*amp + Math.sin(x*.071 - time*1.2)*amp*.5);
+  ctx.lineTo(g.x1, g.bot); ctx.closePath();
+  const grd = ctx.createLinearGradient(0, lvlY, 0, g.bot); grd.addColorStop(0, C.water); grd.addColorStop(1, C["water-deep"]);
+  ctx.fillStyle = grd; ctx.fill();
+  // inner tick lines
+  sc.ticks.forEach(k => { const y = g.bot - k.f*(g.bot-g.top); ctx.strokeStyle = C.ink; ctx.globalAlpha = k.strong ? .28 : .1;
+    ctx.setLineDash(k.strong ? [6,5] : []); ctx.beginPath(); ctx.moveTo(g.x0, y); ctx.lineTo(g.x1, y); ctx.stroke(); });
+  ctx.setLineDash([]); ctx.globalAlpha = 1;
+  ripples.forEach(r => { ctx.strokeStyle = C.surface; ctx.globalAlpha = r.a*.7; ctx.beginPath(); ctx.ellipse(r.x, lvlY, r.r, r.r*.28, 0, 0, Math.PI*2); ctx.stroke(); });
+  ctx.globalAlpha = 1; ctx.restore();
+
+  // glass
+  tankPath(g); ctx.strokeStyle = C.ink; ctx.globalAlpha = .55; ctx.lineWidth = 2; ctx.stroke(); ctx.globalAlpha = 1;
+  // spout
+  const sx = (g.x0 + g.x1)/2; ctx.fillStyle = C.ink; ctx.globalAlpha = .55; ctx.fillRect(sx-5, g.bot, 10, 9); ctx.globalAlpha = 1;
+
+  // spawn drips (constant drain) and pours
+  const surging = performance.now() < surgeUntil;
+  dripAcc += dt * (reduce ? .8 : surging ? 22 : 2.2);
+  while (dripAcc >= 1) { dripAcc--; parts.push({ k: "drip", x: sx + (Math.random()-.5)*(surging?5:1.5), y: g.bot+9, vy: 30 + Math.random()*20, r: surging ? 2.6 : 2 }); }
+  if (pourQueue > 0) { const n = Math.min(pourQueue, dt*55); pourQueue -= n;
+    for (let i = 0; i < Math.ceil(n); i++) parts.push({ k: "food", x: g.x0 + 20 + Math.random()*(g.x1-g.x0-40), y: -8 - Math.random()*20, vy: 120 + Math.random()*80, r: 3 + Math.random()*2.5 }); }
+
+  parts = parts.filter(p => {
+    p.vy += 600*dt; p.y += p.vy*dt;
+    if (p.k === "food" && p.y >= lvlY) { ripples.push({ x: p.x, r: 4, a: 1 }); return false; }
+    if (p.k === "drip" && p.y > H) return false;
+    ctx.fillStyle = p.k === "food" ? C.inflow : (surging ? C.move : C.water);
+    ctx.globalAlpha = p.k === "drip" ? Math.max(0, 1 - (p.y - g.bot)/(H - g.bot)) : 1;
+    ctx.beginPath(); ctx.ellipse(p.x, p.y, p.r*.8, p.r*1.25, 0, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1;
+    return true;
+  });
+  ripples = ripples.filter(r => { r.r += 40*dt; r.a -= dt*1.4; return r.a > 0; });
+}
+
+renderAll();
+setInterval(renderReadout, 1000);
+setInterval(() => { renderWeek(); renderLog(); }, 60000);
+requestAnimationFrame(frame);
+})();
+</script>
+
+</body>
+</html>
