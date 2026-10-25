@@ -115,6 +115,8 @@ input,select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .field{display:flex;flex-direction:column;gap:4px;min-width:0}
 .field label{font-size:13px;font-weight:600}
+.check{display:flex;gap:8px;align-items:center;font-size:14px}
+.check input{width:auto}
 .burn{background:var(--bg);border-radius:10px;padding:10px 12px;font-size:14px}
 .burn b{font-family:var(--f-mono)}
 .actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
@@ -224,6 +226,7 @@ input,select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid
         <option value="very">Physical job</option>
       </select></div>
     <div class="field"><label for="fTdee">Daily burn override (optional, kcal)</label><input id="fTdee" type="number" min="1000" max="6000" placeholder="Leave blank to estimate"></div>
+    <label class="check"><input id="fLearn" type="checkbox" checked> Learn my real daily burn from weigh-ins</label>
     <div class="burn" id="burnPreview"></div>
     <div class="actions">
       <button type="button" class="danger" id="btnRestart" hidden>Start over from now</button>
@@ -247,7 +250,7 @@ let mode = "today", kind = "food";
 try { mode = localStorage.getItem(STORE + "-mode") || "today"; } catch (e) {}
 
 function load(){ try { const s = JSON.parse(localStorage.getItem(STORE)); return s && s.profile ? s : null; } catch(e){ return null; } }
-function save(){ try { localStorage.setItem(STORE, JSON.stringify(state)); } catch(e){} }
+function save(){ ver++; try { localStorage.setItem(STORE, JSON.stringify(state)); } catch(e){} }
 function uid(){ return Math.random().toString(36).slice(2,10); }
 
 function makeExample(){
@@ -280,7 +283,34 @@ function basisAt(t){
   state.entries.forEach(e => { if (e.kind === "weigh" && e.ts <= t && e.ts >= b.ts) b = { ts: e.ts, weight: e.weight, bf: e.bf }; });
   return b;
 }
-function tdeeNow(){ const p = state.profile; if (p.tdee) return p.tdee; const b = basisAt(Date.now()); return tdeeOf({ ...p, weight: b.weight, bf: b.bf }); }
+function formulaTdee(){ const b = basisAt(Date.now()); return tdeeOf({ ...state.profile, tdee: null, weight: b.weight, bf: b.bf }); }
+/* Learned burn: fit a trend line through the last 4 weeks of weigh-ins, then ask what daily burn
+   explains that trend given what you logged. Needs 3+ readings over 10+ days. */
+function learnedTdee(){
+  const p = state.profile; if (p.learn === false) return null;
+  const now = Date.now(), from = now - 28*DAY;
+  const pts = [{ ts: p.start, w: p.weight }, ...state.entries.filter(e => e.kind === "weigh").map(e => ({ ts: e.ts, w: e.weight }))]
+    .filter(x => x.ts >= from && x.ts <= now).sort((a,b) => a.ts - b.ts);
+  if (pts.length < 3) return null;
+  const t0 = pts[0].ts, t1 = pts[pts.length-1].ts, days = (t1 - t0) / DAY;
+  if (days < 10) return null;
+  const xs = pts.map(x => (x.ts - t0) / DAY), ys = pts.map(x => x.w);
+  const mx = xs.reduce((a,b) => a+b) / xs.length, my = ys.reduce((a,b) => a+b) / ys.length;
+  let num = 0, den = 0; xs.forEach((x,i) => { num += (x-mx)*(ys[i]-my); den += (x-mx)**2; });
+  const slope = num / den;
+  const es = state.entries.filter(e => e.ts >= t0 && e.ts < t1);
+  const intake = (sumKind(es,"food") - sumKind(es,"move")) / days;
+  const f = formulaTdee(), est = intake - slope * KCAL_PER_LB;
+  return { tdee: Math.round(Math.min(f*1.35, Math.max(f*.65, est))), n: pts.length, days: Math.round(days) };
+}
+let tCache = { at: 0, ver: -1, v: 0 }, ver = 0;
+function tdeeNow(){
+  const p = state.profile; if (p.tdee) return p.tdee;
+  const now = Date.now(); if (tCache.ver === ver && now - tCache.at < 5000) return tCache.v;
+  const l = learnedTdee(); tCache = { at: now, ver, v: l ? l.tdee : formulaTdee() }; return tCache.v;
+}
+function burnSource(){ const p = state.profile; if (p.tdee) return "your number"; const l = learnedTdee();
+  return l ? `learned from ${l.n} weigh-ins over ${l.days} days` : (p.learn === false ? "estimated" : "estimated until you have 3 weigh-ins over 10 days"); }
 function weightAt(t){
   const b = basisAt(t), es = state.entries.filter(e => e.ts >= b.ts && e.ts <= t);
   const bal = sumKind(es,"food") - sumKind(es,"move") - tdeeNow() * Math.max(0, t - b.ts) / DAY;
@@ -320,6 +350,7 @@ function renderReadout(){
   let html = `<span><b>${signed(lost,3)} ${unit()}</b> since ${since}</span><span>body fat ≈ <b>${m.bf.toFixed(1)}%</b></span>`;
   const g = state.profile.goal;
   if (g && g < state.profile.weight) html += `<span><b>${Math.max(0,toU(m.weight-g)).toFixed(1)} ${unit()}</b> to goal</span>`;
+  html += `<span>burn <b>${n0(m.tdee)}</b> kcal/day, ${burnSource()}</span>`;
   $("#wDelta").innerHTML = html;
   $("#sEat").textContent = n0(t.food);
   $("#sMove").textContent = n0(t.move);
@@ -327,9 +358,9 @@ function renderReadout(){
   const sn = $("#sNet"); sn.textContent = signed(t.net);
   sn.style.color = t.net <= 0 ? "var(--good)" : "var(--inflow)";
   const pe = projection(now);
-  $("#proj").innerHTML = `If you eat nothing else, today ends at <b style="color:${pe <= 0 ? "var(--good)" : "var(--inflow)"}">${signed(pe)} kcal</b> (${signed(toU(pe/KCAL_PER_LB),2)} ${unit()}). That's the dashed "midnight" line in the bucket.`;
+  $("#proj").innerHTML = `If you eat nothing else, today ends at <b style="color:${pe <= 0 ? "var(--good)" : "var(--inflow)"}">${signed(pe)} kcal</b> (${signed(toU(pe/KCAL_PER_LB),2)} ${unit()}). ` + (pe < 0 ? `You can eat about <b style="color:var(--good)">${n0(-pe)} kcal</b> more and still maintain.` : `You're <b style="color:var(--inflow)">${n0(pe)} kcal</b> over maintenance for the day.`);
   $("#caption").textContent = mode === "today"
-    ? `The dashed middle line is where you started today. The amber line is where you'll be at midnight if you eat nothing else: end on the start line and you maintained, below it and you lost. You drain about ${n0(m.tdee/24)} kcal an hour into the pool below.`
+    ? `The dashed middle line is where you started today. Green is break even: fill up to it by midnight and you maintain, and it sinks as the day burns away. Amber is where you'll land at midnight if you eat nothing else. You drain about ${n0(m.tdee/24)} kcal an hour into the pool below.`
     : `Full is where you started at ${toU(state.profile.weight).toFixed(1)} ${unit()}.` + (g && g < state.profile.weight ? ` Empty is your goal of ${toU(g).toFixed(1)} ${unit()}.` : " Add a goal weight to set the bottom of the bucket.");
 }
 
@@ -432,6 +463,7 @@ function openSetup(){
   $("#fWeight").value = ex ? "" : toU(p.weight).toFixed(1);
   $("#fBf").value = ex ? "" : p.bf;
   $("#fGoal").value = ex || !p.goal ? "" : toU(p.goal).toFixed(1);
+  $("#fLearn").checked = p.learn !== false;
   $("#fAct").value = p.activity; $("#fTdee").value = ex || !p.tdee ? "" : p.tdee;
   $("#btnRestart").hidden = ex; $("#btnRestart").textContent = "Start over from now"; restartArmed = false;
   $("#btnSave").textContent = ex ? "Start my bucket" : "Save";
@@ -440,7 +472,7 @@ function openSetup(){
 function readForm(){
   const u = $("#fUnit").value, cv = v => u === "kg" ? v*LB_PER_KG : v;
   const w = parseFloat($("#fWeight").value), bf = parseFloat($("#fBf").value), g = parseFloat($("#fGoal").value), td = parseInt($("#fTdee").value);
-  return { unit: u, weight: w > 0 ? cv(w) : null, bf: bf > 0 ? bf : null, goal: g > 0 ? cv(g) : null, activity: $("#fAct").value, tdee: td >= 1000 ? td : null };
+  return { unit: u, weight: w > 0 ? cv(w) : null, bf: bf > 0 ? bf : null, goal: g > 0 ? cv(g) : null, activity: $("#fAct").value, learn: $("#fLearn").checked, tdee: td >= 1000 ? td : null };
 }
 function previewBurn(){
   const f = readForm();
@@ -472,7 +504,7 @@ function resize(){ const r = cv.getBoundingClientRect(), d = devicePixelRatio ||
   W = r.width; H = r.height; cv.width = Math.round(W*d); cv.height = Math.round(H*d); ctx.setTransform(d,0,0,d,0,0); }
 new ResizeObserver(resize).observe(cv);
 function readColors(){ const cs = getComputedStyle(document.documentElement);
-  ["bg","surface","ink","muted","line","water","water-deep","inflow","move"].forEach(k => C[k] = cs.getPropertyValue("--"+k).trim()); }
+  ["bg","surface","ink","muted","line","water","water-deep","inflow","move","good"].forEach(k => C[k] = cs.getPropertyValue("--"+k).trim()); }
 readColors();
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", readColors);
 new MutationObserver(readColors).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme","class"] });
@@ -484,7 +516,9 @@ function scale(){
     const ticks = [-1500,-1000,-500,0,500,1000,1500].map(k => ({ f: .5 + k/3000, label: k === 0 ? "start" : signed(k), strong: k === 0 }));
     const t1 = midnight(midnight(now) + DAY + 72e5);
     const endW = model(now).weight - tdeeNow() * (t1 - now) / DAY / KCAL_PER_LB, startW = weightAt(midnight(now)).weight;
+    const remDrain = tdeeNow() * (t1 - now) / DAY, left = remDrain - t.net;
     return { level: .5 + t.net/3000, ticks, ghost: .5 + projection(now)/3000,
+      be: .5 + remDrain/3000, beLabel: left >= 0 ? `break even · ${n0(left)} left` : `break even · ${n0(-left)} over`,
       startLabel: `start of day ${toU(startW).toFixed(2)}`, ghostLabel: `midnight ${toU(endW).toFixed(2)} ${unit()}` };
   }
   const p = state.profile, w = model(now).weight;
@@ -545,6 +579,11 @@ function draw(time, dt){
     ctx.beginPath(); ctx.moveTo(g.x0+2, gy); ctx.lineTo(g.x1-2, gy); ctx.stroke(); ctx.setLineDash([]);
     ctx.fillStyle = C.inflow; ctx.textAlign = "right"; ctx.textBaseline = gf > .9 ? "top" : "bottom";
     ctx.fillText(sc.ghostLabel, g.x1-8, gy + (gf > .9 ? 5 : -5)); ctx.lineWidth = 1; }
+  if (sc.be != null) { const bf = Math.max(.01, Math.min(.99, sc.be)), by = g.bot - bf*(g.bot-g.top);
+    ctx.strokeStyle = C.good; ctx.lineWidth = 2; ctx.setLineDash([10,5]);
+    ctx.beginPath(); ctx.moveTo(g.x0+2, by); ctx.lineTo(g.x1-2, by); ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
+    ctx.fillStyle = C.good; ctx.textAlign = "left"; ctx.textBaseline = bf > .9 ? "top" : "bottom";
+    ctx.fillText(sc.beLabel, g.x0+8, by + (bf > .9 ? 5 : -5)); }
   if (sc.startLabel) { const sy = g.bot - .5*(g.bot-g.top);
     ctx.fillStyle = C.ink; ctx.textAlign = "left"; ctx.textBaseline = "bottom"; ctx.fillText(sc.startLabel, g.x0+8, sy-5); }
 
