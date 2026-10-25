@@ -76,6 +76,8 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .kind{display:flex;gap:6px}
 .kind button{flex:1;border:1px solid var(--line);background:transparent;border-radius:10px;padding:8px;font-weight:600;color:var(--muted)}
 .kind button[aria-pressed="true"].f{border-color:var(--inflow);color:var(--inflow);background:color-mix(in srgb,var(--inflow) 10%,transparent)}
+.kind button[aria-pressed="true"].w{border-color:var(--ink);color:var(--ink);background:color-mix(in srgb,var(--ink) 8%,transparent)}
+.floater.weigh{color:var(--ink)} .log .k.weigh{color:var(--ink)}
 .kind button[aria-pressed="true"].m{border-color:var(--move);color:var(--move);background:color-mix(in srgb,var(--move) 10%,transparent)}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
 .chip{border:1px solid var(--line);background:var(--bg);border-radius:999px;padding:6px 11px;font-size:13.5px}
@@ -167,14 +169,20 @@ input,select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid
 
       <div class="card">
         <div class="kind">
-          <button id="kFood" class="f" aria-pressed="true" type="button">Ate something</button>
-          <button id="kMove" class="m" aria-pressed="false" type="button">Exercised</button>
+          <button id="kFood" class="f" aria-pressed="true" type="button">Food</button>
+          <button id="kMove" class="m" aria-pressed="false" type="button">Exercise</button>
+          <button id="kWeigh" class="w" aria-pressed="false" type="button">Weigh-in</button>
         </div>
         <div class="chips" id="chips"></div>
         <form id="customForm" class="custom">
           <input id="cName" placeholder="What was it?" autocomplete="off">
           <input id="cKcal" type="number" inputmode="numeric" min="1" max="5000" placeholder="kcal">
           <button class="primary" type="submit">Add</button>
+        </form>
+        <form id="weighForm" class="custom" hidden>
+          <input id="wVal" type="number" step="0.1" min="20" max="1000" inputmode="decimal" placeholder="Scale weight">
+          <input id="wBf" type="number" step="0.5" min="3" max="70" inputmode="decimal" placeholder="Fat % (opt.)">
+          <button class="primary" type="submit">Save</button>
         </form>
         <p class="hint" id="kindHint"></p>
       </div>
@@ -266,26 +274,32 @@ function tdeeOf(p){
   return Math.round((370 + 21.6*lbm) * ACT[p.activity]);
 }
 function sumKind(list, k){ return list.reduce((a,e) => a + (e.kind === k ? e.kcal : 0), 0); }
-function model(now){
-  const p = state.profile, tdee = tdeeOf(p);
-  const drained = tdee * Math.max(0, now - dayZero(p)) / DAY;
-  const bal = sumKind(state.entries,"food") - sumKind(state.entries,"move") - drained;
-  const weight = p.weight + bal / KCAL_PER_LB;
-  const fat = p.weight*p.bf/100 + bal / KCAL_PER_LB;
-  return { tdee, bal, weight, bf: 100*fat/weight };
+/* The estimate starts from your latest scale reading (or your setup numbers) and runs forward from there. */
+function basisAt(t){
+  const p = state.profile; let b = { ts: dayZero(p), weight: p.weight, bf: p.bf };
+  state.entries.forEach(e => { if (e.kind === "weigh" && e.ts <= t && e.ts >= b.ts) b = { ts: e.ts, weight: e.weight, bf: e.bf }; });
+  return b;
 }
+function tdeeNow(){ const p = state.profile; if (p.tdee) return p.tdee; const b = basisAt(Date.now()); return tdeeOf({ ...p, weight: b.weight, bf: b.bf }); }
+function weightAt(t){
+  const b = basisAt(t), es = state.entries.filter(e => e.ts >= b.ts && e.ts <= t);
+  const bal = sumKind(es,"food") - sumKind(es,"move") - tdeeNow() * Math.max(0, t - b.ts) / DAY;
+  const weight = b.weight + bal / KCAL_PER_LB;
+  return { weight, bf: 100 * (b.weight*b.bf/100 + bal/KCAL_PER_LB) / weight };
+}
+function model(now){ const w = weightAt(now); return { tdee: tdeeNow(), weight: w.weight, bf: w.bf }; }
 function dayWindow(t0, t1){
   const p = state.profile, from = Math.max(t0, dayZero(p)), to = Math.min(t1, Date.now());
   if (to <= from) return null;
   const es = state.entries.filter(e => e.ts >= t0 && e.ts < t1);
-  const food = sumKind(es,"food"), move = sumKind(es,"move"), drain = tdeeOf(p) * (to - from) / DAY;
+  const food = sumKind(es,"food"), move = sumKind(es,"move"), drain = tdeeNow() * (to - from) / DAY;
   return { food, move, drain, net: food - move - drain, entries: es };
 }
 /* Your first day counts from its midnight, so food eaten before you set up is balanced by a full day of burn. */
 function dayZero(p){ return midnight(p.start); }
 function projection(now){
   const t0 = midnight(now), t1 = midnight(t0 + DAY + 72e5), t = dayWindow(t0, t1) || {food:0, move:0};
-  const end = t.food - t.move - tdeeOf(state.profile) * (t1 - Math.max(t0, dayZero(state.profile))) / DAY;
+  const end = t.food - t.move - tdeeNow() * (t1 - Math.max(t0, dayZero(state.profile))) / DAY;
   return end;
 }
 function midnight(t){ const d = new Date(t); d.setHours(0,0,0,0); return d.getTime(); }
@@ -315,7 +329,7 @@ function renderReadout(){
   const pe = projection(now);
   $("#proj").innerHTML = `If you eat nothing else, today ends at <b style="color:${pe <= 0 ? "var(--good)" : "var(--inflow)"}">${signed(pe)} kcal</b> (${signed(toU(pe/KCAL_PER_LB),2)} ${unit()}). That's the dashed "midnight" line in the bucket.`;
   $("#caption").textContent = mode === "today"
-    ? `The middle line means even for the day. You drain about ${n0(m.tdee/24)} kcal an hour, around the clock. Food pours in, workouts open the tap.`
+    ? `The dashed middle line is where you started today. The amber line is where you'll be at midnight if you eat nothing else: end on the start line and you maintained, below it and you lost. You drain about ${n0(m.tdee/24)} kcal an hour into the pool below.`
     : `Full is where you started at ${toU(state.profile.weight).toFixed(1)} ${unit()}.` + (g && g < state.profile.weight ? ` Empty is your goal of ${toU(g).toFixed(1)} ${unit()}.` : " Add a goal weight to set the bottom of the bucket.");
 }
 
@@ -330,7 +344,7 @@ function renderLog(){
     li.innerHTML = `<span class="t"></span><span class="n"></span><span class="k ${e.kind}"></span><button class="del" type="button" aria-label="Remove">×</button>`;
     li.querySelector(".t").textContent = time;
     li.querySelector(".n").textContent = e.name;
-    li.querySelector(".k").textContent = (e.kind === "food" ? "+" : "−") + n0(e.kcal);
+    li.querySelector(".k").textContent = e.kind === "weigh" ? `${toU(e.weight).toFixed(1)} ${unit()}` : (e.kind === "food" ? "+" : "−") + n0(e.kcal);
     li.querySelector(".del").onclick = () => { state.entries = state.entries.filter(x => x.id !== e.id); save(); renderAll(); };
     ul.appendChild(li);
   });
@@ -365,9 +379,14 @@ function renderChips(){
   $("#kFood").setAttribute("aria-pressed", kind === "food");
   $("#kMove").setAttribute("aria-pressed", kind === "move");
   $("#cName").placeholder = kind === "food" ? "What did you eat?" : "What did you do?";
-  $("#kindHint").textContent = kind === "food"
-    ? "Tap a preset to pour it in, or type your own with its calories from the label."
-    : "Workout presets are sized to your weight and count only the extra burn above resting, since resting is already draining.";
+  $("#kWeigh").setAttribute("aria-pressed", kind === "weigh");
+  $("#chips").hidden = kind === "weigh"; $("#customForm").hidden = kind === "weigh"; $("#weighForm").hidden = kind !== "weigh";
+  $("#wVal").placeholder = `Scale weight (${unit()})`;
+  $("#kindHint").textContent = {
+    food: "Tap a preset to pour it in, or type your own with its calories from the label.",
+    move: "Workout presets are sized to your weight and count only the extra burn above resting, since resting is already draining.",
+    weigh: "Resets the estimate to your real scale reading, and your daily burn updates to the new weight. Scale weight swings with water and food, so a morning reading before eating is the most consistent. Leave fat % blank to keep the current estimate."
+  }[kind];
 }
 
 function renderAll(){ renderReadout(); renderLog(); renderWeek(); renderChips();
@@ -390,6 +409,14 @@ function floater(k, text){
 /* ---------- events ---------- */
 $("#kFood").onclick = () => { kind = "food"; renderChips(); };
 $("#kMove").onclick = () => { kind = "move"; renderChips(); };
+$("#kWeigh").onclick = () => { kind = "weigh"; renderChips(); };
+$("#weighForm").addEventListener("submit", e => { e.preventDefault();
+  const v = parseFloat($("#wVal").value); if (!(v > 0)) { $("#wVal").focus(); return; }
+  const now = Date.now(), before = model(now), lb = fromU(v), bf = parseFloat($("#wBf").value);
+  state.entries.push({ id: uid(), ts: now, kind: "weigh", name: "Weighed in", weight: lb, bf: bf > 0 ? bf : before.bf, kcal: 0 });
+  save(); renderAll();
+  floater("weigh", `Estimate moved ${signed(toU(lb - before.weight), 2)} ${unit()}`);
+  $("#wVal").value = ""; $("#wBf").value = ""; });
 $("#customForm").addEventListener("submit", e => { e.preventDefault();
   const k = parseFloat($("#cKcal").value); if (!(k > 0)) { $("#cKcal").focus(); return; }
   addEntry($("#cName").value.trim(), k); $("#cName").value = ""; $("#cKcal").value = ""; });
@@ -454,8 +481,11 @@ function scale(){
   const now = Date.now();
   if (mode === "today") {
     const t = dayWindow(midnight(now), midnight(now) + DAY) || { net: 0 };
-    const ticks = [-1500,-1000,-500,0,500,1000,1500].map(k => ({ f: .5 + k/3000, label: k === 0 ? "even" : signed(k), strong: k === 0 }));
-    return { level: .5 + t.net/3000, ticks, ghost: .5 + projection(now)/3000 };
+    const ticks = [-1500,-1000,-500,0,500,1000,1500].map(k => ({ f: .5 + k/3000, label: k === 0 ? "start" : signed(k), strong: k === 0 }));
+    const t1 = midnight(midnight(now) + DAY + 72e5);
+    const endW = model(now).weight - tdeeNow() * (t1 - now) / DAY / KCAL_PER_LB, startW = weightAt(midnight(now)).weight;
+    return { level: .5 + t.net/3000, ticks, ghost: .5 + projection(now)/3000,
+      startLabel: `start of day ${toU(startW).toFixed(2)}`, ghostLabel: `midnight ${toU(endW).toFixed(2)} ${unit()}` };
   }
   const p = state.profile, w = model(now).weight;
   let lo = p.goal && p.goal < p.weight ? p.goal : p.weight - 10;
@@ -468,8 +498,8 @@ function scale(){
   return { level: (w-lo)/(hi-lo), ticks };
 }
 
-let shown = null, parts = [], ripples = [], surgeUntil = 0, pourQueue = 0, last = performance.now(), dripAcc = 0;
-function geo(){ const x0 = Math.max(70, W*.2), x1 = W - Math.max(16, W*.08), top = 18, bot = H - 64; return { x0, x1, top, bot, r: Math.min(30, (x1-x0)*.12) }; }
+let shown = null, shownPool = null, parts = [], ripples = [], surgeUntil = 0, pourQueue = 0, last = performance.now(), dripAcc = 0;
+function geo(){ const x0 = Math.max(70, W*.2), x1 = W - Math.max(16, W*.08), top = 18, bot = H - 90; return { x0, x1, top, bot, r: Math.min(30, (x1-x0)*.12) }; }
 function tankPath(g){ ctx.beginPath(); ctx.moveTo(g.x0, g.top); ctx.lineTo(g.x0, g.bot-g.r); ctx.quadraticCurveTo(g.x0, g.bot, g.x0+g.r, g.bot);
   ctx.lineTo(g.x1-g.r, g.bot); ctx.quadraticCurveTo(g.x1, g.bot, g.x1, g.bot-g.r); ctx.lineTo(g.x1, g.top); }
 function pour(kcal){ pourQueue += Math.min(36, 6 + kcal/30); }
@@ -514,12 +544,28 @@ function draw(time, dt){
     ctx.strokeStyle = C.inflow; ctx.lineWidth = 2; ctx.setLineDash([3,4]);
     ctx.beginPath(); ctx.moveTo(g.x0+2, gy); ctx.lineTo(g.x1-2, gy); ctx.stroke(); ctx.setLineDash([]);
     ctx.fillStyle = C.inflow; ctx.textAlign = "right"; ctx.textBaseline = gf > .9 ? "top" : "bottom";
-    ctx.fillText("midnight", g.x1-8, gy + (gf > .9 ? 5 : -5)); ctx.lineWidth = 1; }
+    ctx.fillText(sc.ghostLabel, g.x1-8, gy + (gf > .9 ? 5 : -5)); ctx.lineWidth = 1; }
+  if (sc.startLabel) { const sy = g.bot - .5*(g.bot-g.top);
+    ctx.fillStyle = C.ink; ctx.textAlign = "left"; ctx.textBaseline = "bottom"; ctx.fillText(sc.startLabel, g.x0+8, sy-5); }
 
   // glass
   tankPath(g); ctx.strokeStyle = C.ink; ctx.globalAlpha = .55; ctx.lineWidth = 2; ctx.stroke(); ctx.globalAlpha = 1;
   // spout
   const sx = (g.x0 + g.x1)/2; ctx.fillStyle = C.ink; ctx.globalAlpha = .55; ctx.fillRect(sx-5, g.bot, 10, 9); ctx.globalAlpha = 1;
+
+  // pool: everything drained today collects here
+  const tw = (g.x1-g.x0)*.5, tx0 = sx - tw/2, tx1 = sx + tw/2, ty0 = H - 42, ty1 = H - 6, tr = 8;
+  const n0w = Date.now(), tdy = dayWindow(midnight(n0w), midnight(midnight(n0w) + DAY + 72e5)) || { drain: 0, move: 0 };
+  const poolTarget = Math.min(1, (tdy.drain + tdy.move) / (tdeeNow() * 1.3));
+  shownPool = shownPool == null ? poolTarget : shownPool + (poolTarget - shownPool) * Math.min(1, dt*2.5);
+  const poolY = ty1 - shownPool * (ty1 - ty0);
+  const trayPath = () => { ctx.beginPath(); ctx.moveTo(tx0, ty0); ctx.lineTo(tx0, ty1-tr); ctx.quadraticCurveTo(tx0, ty1, tx0+tr, ty1);
+    ctx.lineTo(tx1-tr, ty1); ctx.quadraticCurveTo(tx1, ty1, tx1, ty1-tr); ctx.lineTo(tx1, ty0); };
+  ctx.save(); trayPath(); ctx.closePath(); ctx.clip(); ctx.fillStyle = C["water-deep"]; ctx.fillRect(tx0, poolY, tw, ty1 - poolY); ctx.restore();
+  trayPath(); ctx.strokeStyle = C.ink; ctx.globalAlpha = .55; ctx.lineWidth = 2; ctx.stroke(); ctx.globalAlpha = 1; ctx.lineWidth = 1;
+  ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  ctx.fillStyle = C.water; ctx.fillText(n0(tdy.drain + tdy.move) + " kcal", tx0 - 10, ty0 + 10);
+  ctx.fillStyle = C.muted; ctx.fillText("drained today", tx0 - 10, ty0 + 25);
 
   // spawn drips (constant drain) and pours
   const surging = performance.now() < surgeUntil;
@@ -531,9 +577,9 @@ function draw(time, dt){
   parts = parts.filter(p => {
     p.vy += 600*dt; p.y += p.vy*dt;
     if (p.k === "food" && p.y >= lvlY) { ripples.push({ x: p.x, r: 4, a: 1 }); return false; }
-    if (p.k === "drip" && p.y > H) return false;
+    if (p.k === "drip" && p.y > poolY) return false;
     ctx.fillStyle = p.k === "food" ? C.inflow : (surging ? C.move : C.water);
-    ctx.globalAlpha = p.k === "drip" ? Math.max(0, 1 - (p.y - g.bot)/(H - g.bot)) : 1;
+    ctx.globalAlpha = 1;
     ctx.beginPath(); ctx.ellipse(p.x, p.y, p.r*.8, p.r*1.25, 0, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1;
     return true;
   });
