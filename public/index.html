@@ -116,6 +116,7 @@ input,select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .field{display:flex;flex-direction:column;gap:4px;min-width:0}
 .field label{font-size:13px;font-weight:600}
+.wipe{border-top:1px solid var(--line);padding-top:12px;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
 .check{display:flex;gap:8px;align-items:center;font-size:14px}
 .check input{width:auto}
 .burn{background:var(--bg);border-radius:10px;padding:10px 12px;font-size:14px}
@@ -234,6 +235,10 @@ input,select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid
       <button type="button" class="danger" id="btnRestart" hidden>Start over from now</button>
       <button type="button" class="ghost" id="btnCancel">Cancel</button>
       <button type="submit" class="primary" id="btnSave">Save</button>
+    </div>
+    <div class="wipe">
+      <button type="button" class="danger" id="btnWipe">Delete all my data</button>
+      <p class="hint" id="wipeHint">Erases your profile, log and weigh-ins on this device and, when you're signed in, on the server and your other devices. This can't be undone.</p>
     </div>
   </form>
 </div>
@@ -467,7 +472,8 @@ function openSetup(){
   $("#fGoal").value = ex || !p.goal ? "" : toU(p.goal).toFixed(1);
   $("#fLearn").checked = p.learn !== false;
   $("#fAct").value = p.activity; $("#fTdee").value = ex || !p.tdee ? "" : p.tdee;
-  $("#btnRestart").hidden = ex; $("#btnRestart").textContent = "Start over from now"; restartArmed = false;
+  $("#btnRestart").hidden = ex; wipeArmed = false; $("#btnWipe").textContent = "Delete all my data";
+  $("#wipeHint").textContent = "Erases your profile, log and weigh-ins on this device and, when you're signed in, on the server and your other devices. This can't be undone."; $("#btnRestart").textContent = "Start over from now"; restartArmed = false;
   $("#btnSave").textContent = ex ? "Start my bucket" : "Save";
   previewBurn(); sheet.hidden = false; $("#fWeight").focus();
 }
@@ -492,6 +498,27 @@ $("#setupForm").addEventListener("submit", e => { e.preventDefault();
   if (state.example) { state = { example: false, profile: { ...f, start: Date.now() }, profileAt: Date.now(), entries: [], deleted: [] }; }
   else { state.profile = { ...state.profile, ...f }; state.profileAt = Date.now(); }
   save(); sheet.hidden = true; renderAll(); });
+let wipeArmed = false;
+function wipeLocal(){
+  try { localStorage.removeItem(STORE); localStorage.removeItem(STORE + "-mode"); } catch(e){}
+  state = makeExample(); mode = "today"; kind = "food"; ver++; renderAll();
+}
+$("#btnWipe").onclick = async () => {
+  const btn = $("#btnWipe");
+  if (!wipeArmed) { wipeArmed = true; btn.textContent = "Tap again to delete everything"; return; }
+  wipeArmed = false; btn.disabled = true; btn.textContent = "Deleting…";
+  if (sync.mode !== "off") {
+    clearTimeout(sync.timer);
+    try { await api("DELETE", { at: Date.now() }); }
+    catch (e) {
+      if (!e.noApi) { btn.disabled = false; btn.textContent = "Delete all my data";
+        $("#wipeHint").textContent = "Couldn't reach the server, so nothing was deleted. Check your connection and try again."; return; }
+    }
+  }
+  btn.disabled = false; btn.textContent = "Delete all my data";
+  sheet.hidden = true; wipeLocal();
+  setSync(sync.mode === "on" ? "All data deleted. Set up your numbers to start fresh." : "");
+};
 let restartArmed = false;
 $("#btnRestart").onclick = () => {
   if (!restartArmed) { restartArmed = true; $("#btnRestart").textContent = "Tap again to clear your log"; return; }
@@ -520,7 +547,9 @@ async function syncNow(){
   sync.busy = true;
   try {
     const j = state.example ? await api("GET") : await api("PUT", { state });
-    sync.mode = "on"; adopt(j.state);
+    sync.mode = "on";
+    if (j.resetAt && !state.example && state.profile.start <= j.resetAt) { wipeLocal(); setSync(`Your data was deleted from another device. Signed in as ${j.email}`); return; }
+    adopt(j.state);
     setSync(`Synced to ${j.email}`);
   } catch (e) {
     if (sync.mode === "probe" && !e.status) { sync.mode = "off"; setSync(""); }

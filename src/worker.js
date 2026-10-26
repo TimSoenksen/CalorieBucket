@@ -6,16 +6,35 @@
 import { DurableObject } from "cloudflare:workers";
 
 /* ---------- per-user storage ---------- */
+// "Delete all my data" records when it happened. Any device that later sends a log
+// started before that moment gets told to clear itself instead of bringing the data back.
 export class UserStore extends DurableObject {
   async load() {
-    return (await this.ctx.storage.get("state")) ?? null;
+    const s = await this.ctx.storage.get("state");
+    return s && s.profile ? s : null;
+  }
+  async resetAt() {
+    return (await this.ctx.storage.get("resetAt")) || 0;
+  }
+  async read() {
+    return { state: await this.load(), resetAt: await this.resetAt() };
   }
   async save(incoming) {
+    const resetAt = await this.resetAt();
+    if (incoming?.profile && incoming.profile.start <= resetAt) return { state: await this.load(), resetAt };
     const merged = merge(await this.load(), incoming);
-    await this.ctx.storage.put("state", merged);
-    return merged;
+    if (merged) await this.ctx.storage.put("state", merged);
+    return { state: merged, resetAt };
+  }
+  async wipe(at) {
+    const now = Date.now();
+    const resetAt = Number.isFinite(at) && at > 0 && at < now + DAY_MS ? at : now;
+    await this.ctx.storage.delete("state");
+    await this.ctx.storage.put("resetAt", resetAt);
+    return { state: null, resetAt };
   }
 }
+const DAY_MS = 864e5;
 
 // Combine what's stored with what a device sent, so two devices never erase each other.
 // - "Start over" picks a new start time, and the newest start wins outright.
@@ -118,14 +137,18 @@ export default {
       const store = env.STORE.get(env.STORE.idFromName(email));
 
       if (request.method === "GET") {
-        return json({ email, state: await store.load() });
+        return json({ email, ...(await store.read()) });
       }
       if (request.method === "PUT") {
         const body = await request.json().catch(() => null);
         if (!body || typeof body.state !== "object") throw new HttpError(400, "Expected { state }.");
-        return json({ email, state: await store.save(body.state) });
+        return json({ email, ...(await store.save(body.state)) });
       }
-      throw new HttpError(405, "Use GET or PUT.");
+      if (request.method === "DELETE") {
+        const body = await request.json().catch(() => ({}));
+        return json({ email, ...(await store.wipe(body?.at)) });
+      }
+      throw new HttpError(405, "Use GET, PUT or DELETE.");
     } catch (err) {
       const status = err instanceof HttpError ? err.status : 500;
       return json({ error: err.message || "Something went wrong." }, status);
