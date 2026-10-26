@@ -1,5 +1,20 @@
 {
   "name": "caloriebucket",
+  "main": "src/worker.js",
   "compatibility_date": "2025-10-01",
-  "assets": { "directory": "./public" }
+
+  // The page itself. Anything that isn't a file here (like /api/state) goes to the Worker.
+  "assets": { "directory": "./public", "binding": "ASSETS" },
+
+  // One private store per signed-in person. Created automatically on deploy.
+  "durable_objects": {
+    "bindings": [{ "name": "STORE", "class_name": "UserStore" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserStore"] }],
+
+  // Fill these in from Cloudflare Zero Trust (see README).
+  "vars": {
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": ""
+  }
 }

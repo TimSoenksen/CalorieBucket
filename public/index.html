@@ -33,6 +33,7 @@ h1,h2{font-family:var(--f-display);margin:0;text-wrap:balance}
 h1{font-size:30px;font-weight:700;letter-spacing:-.01em}
 h2{font-size:17px;font-weight:700}
 .top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.sync{margin:6px 0 0;font-size:12.5px;color:var(--muted)}
 .sub{margin:4px 0 0;color:var(--muted);max-width:46ch}
 button{font:inherit;color:inherit;cursor:pointer}
 button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--water);outline-offset:2px}
@@ -131,6 +132,7 @@ input,select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid
     <div>
       <h1>Calorie Bucket</h1>
       <p class="sub">Your body drains energy every second. Food pours some back in. Watch the level.</p>
+      <p class="sync" id="syncStatus" hidden></p>
     </div>
     <button id="btnSetup" class="ghost" type="button">Your numbers</button>
   </header>
@@ -250,7 +252,7 @@ let mode = "today", kind = "food";
 try { mode = localStorage.getItem(STORE + "-mode") || "today"; } catch (e) {}
 
 function load(){ try { const s = JSON.parse(localStorage.getItem(STORE)); return s && s.profile ? s : null; } catch(e){ return null; } }
-function save(){ ver++; try { localStorage.setItem(STORE, JSON.stringify(state)); } catch(e){} }
+function save(){ ver++; try { localStorage.setItem(STORE, JSON.stringify(state)); } catch(e){} scheduleSync(); }
 function uid(){ return Math.random().toString(36).slice(2,10); }
 
 function makeExample(){
@@ -376,7 +378,7 @@ function renderLog(){
     li.querySelector(".t").textContent = time;
     li.querySelector(".n").textContent = e.name;
     li.querySelector(".k").textContent = e.kind === "weigh" ? `${toU(e.weight).toFixed(1)} ${unit()}` : (e.kind === "food" ? "+" : "−") + n0(e.kcal);
-    li.querySelector(".del").onclick = () => { state.entries = state.entries.filter(x => x.id !== e.id); save(); renderAll(); };
+    li.querySelector(".del").onclick = () => { state.entries = state.entries.filter(x => x.id !== e.id); (state.deleted ||= []).push(e.id); save(); renderAll(); };
     ul.appendChild(li);
   });
 }
@@ -487,14 +489,57 @@ sheet.addEventListener("click", e => { if (e.target === sheet) sheet.hidden = tr
 document.addEventListener("keydown", e => { if (e.key === "Escape") sheet.hidden = true; });
 $("#setupForm").addEventListener("submit", e => { e.preventDefault();
   const f = readForm(); if (!f.weight || !f.bf) return;
-  if (state.example) { state = { example: false, profile: { ...f, start: Date.now() }, entries: [] }; }
-  else { state.profile = { ...state.profile, ...f }; }
+  if (state.example) { state = { example: false, profile: { ...f, start: Date.now() }, profileAt: Date.now(), entries: [], deleted: [] }; }
+  else { state.profile = { ...state.profile, ...f }; state.profileAt = Date.now(); }
   save(); sheet.hidden = true; renderAll(); });
 let restartArmed = false;
 $("#btnRestart").onclick = () => {
   if (!restartArmed) { restartArmed = true; $("#btnRestart").textContent = "Tap again to clear your log"; return; }
   const f = readForm(); if (!f.weight || !f.bf) return;
-  state = { example: false, profile: { ...f, start: Date.now() }, entries: [] }; save(); sheet.hidden = true; renderAll(); };
+  state = { example: false, profile: { ...f, start: Date.now() }, profileAt: Date.now(), entries: [], deleted: [] }; save(); sheet.hidden = true; renderAll(); };
+
+/* ---------- sync: only active when the page is served with its Worker API ---------- */
+const sync = { mode: "probe", timer: 0, busy: false, again: false };
+function setSync(text){ const el = $("#syncStatus"); el.hidden = !text; el.textContent = text || ""; }
+async function api(method, body){
+  const r = await fetch("/api/state", { method, credentials: "same-origin",
+    headers: body ? { "content-type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined });
+  if (!(r.headers.get("content-type") || "").includes("application/json")) { const e = new Error("no api"); e.noApi = true; throw e; }
+  const j = await r.json();
+  if (!r.ok) { const e = new Error(j.error || "Sync failed."); e.status = r.status; throw e; }
+  return j;
+}
+function adopt(remote){
+  if (!remote || !remote.profile) return;
+  const was = JSON.stringify(state); state = remote;
+  if (JSON.stringify(state) !== was) { try { localStorage.setItem(STORE, JSON.stringify(state)); } catch(e){} ver++; renderAll(); }
+}
+async function syncNow(){
+  if (sync.mode === "off") return;
+  if (sync.busy) { sync.again = true; return; }
+  sync.busy = true;
+  try {
+    const j = state.example ? await api("GET") : await api("PUT", { state });
+    sync.mode = "on"; adopt(j.state);
+    setSync(`Synced to ${j.email}`);
+  } catch (e) {
+    if (sync.mode === "probe" && !e.status) { sync.mode = "off"; setSync(""); }
+    else if (e.status) setSync(e.message + " Your log is still saved on this device.");
+    else setSync("Couldn't reach the server. Your log is saved on this device and will sync when you're back.");
+  } finally {
+    sync.busy = false;
+    if (sync.again) { sync.again = false; scheduleSync(); }
+  }
+}
+function scheduleSync(){
+  if (sync.mode === "off") return;
+  clearTimeout(sync.timer);
+  if (sync.mode === "on") setSync("Saving…");
+  sync.timer = setTimeout(syncNow, 700);
+}
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") syncNow(); });
+addEventListener("online", () => { if (sync.mode === "off") sync.mode = "probe"; syncNow(); });
+setInterval(() => { if (document.visibilityState === "visible") syncNow(); }, 60000);
 
 /* ---------- the tank ---------- */
 const cv = $("#tank"), ctx = cv.getContext("2d");
@@ -626,6 +671,7 @@ function draw(time, dt){
 }
 
 renderAll();
+syncNow();
 setInterval(renderReadout, 1000);
 setInterval(() => { renderWeek(); renderLog(); }, 60000);
 requestAnimationFrame(frame);
